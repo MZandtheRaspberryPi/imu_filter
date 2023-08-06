@@ -16,16 +16,36 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 
-Q = 0.01 * np.eye(9)
-R = 0.1 * np.array([[1]])
+Q = 0.01 * np.eye(3)
+R = 0.1 * np.eye(3)
 
-INITIAL_ESTIMATE = np.zeros((9,1))
+INITIAL_ESTIMATE = np.zeros((3,1))
 
-INITIAL_COVARIANCE = 0.1 * np.eye(9)
+INITIAL_COVARIANCE = 0.1 * np.eye(3)
 
 THIS_FILE_DIR = os.path.dirname(__file__)
 DATASET_DIR = os.path.join(THIS_FILE_DIR, "..", "RepoIMU")
-DATASET_PATH = os.path.join(DATASET_DIR, "TStick", "TStick_Test02_Trial1.csv")
+DATASET_PATH = os.path.join(DATASET_DIR, "TStick", "TStick_Test11_Trial1.csv")
+
+def get_x_rotation(phi: float):
+
+    x_rotation = np.array([[1, 0, 0],
+                           [0, math.cos(phi), -math.sin(phi)],
+                            [0, math.sin(phi), math.cos(phi)]])
+    return x_rotation
+
+def get_y_rotation(theta: float):
+
+    y_rotation = np.array([[math.cos(theta), 0, math.sin(theta)],
+                           [0, 1, 0],
+                           [-math.sin(theta), 0, math.cos(theta)]])
+    return y_rotation
+
+def get_z_rotation(psi: float):
+    z_rotation = np.array([[math.cos(psi), math.sin(psi), 0],
+                           [-math.sin(psi), math.cos(psi), 0],
+                           [0, 0, 1]])
+    return z_rotation
 
 def get_gaussian_noise(
         num_samples: int, mu: Any, sigma: Any) -> Any:
@@ -83,8 +103,8 @@ def get_gaussian_error_ellipses(expected_value: Any, sigma: Any,
 def load_dataset(dataset_path: str):
 
     df = pd.read_csv(dataset_path,
-                     header=[0,1], delimiter=";")
-    df = df.iloc[:, :-1]
+                     header=None, delimiter=";",
+                     skiprows=[0,1])
 
     df.columns = ["time_s", "vicon_orientation_w", "vicon_orientation_x", "vicon_orientation_y", "vicon_orientation_z",
                   "imu_acc_x", "imu_acc_y", "imu_acc_z", "imu_gyro_x", "imu_gyro_y", "imu_gyro_z", "imu_magn_x",
@@ -102,147 +122,49 @@ def load_dataset(dataset_path: str):
 def get_a_matrix(
         prior_state: Any, delta_t: float, angular_rotation: Any,
         gravitational_constant: float = -9.81):
-    s_x, s_y, s_z = prior_state[0:3, 0]
-    v_x, v_y, v_z = prior_state[3:6, 0]
-    phi, theta, psi = prior_state[6:, 0]
+    #s_x, s_y, s_z = prior_state[0:3, 0]
+    #v_x, v_y, v_z = prior_state[3:6, 0]
+    phi, theta, psi = prior_state[:3, 0]
 
     omega_x, omega_y, omega_z = angular_rotation[:, 0]
 
     a_matrix = np.zeros((prior_state.shape[0], prior_state.shape[0]))
 
-    a_matrix[0,0] = 1
-    a_matrix[0,1] = 0
+    a_matrix[0,0] = 1 + delta_t * np.cos(phi) * np.tan(theta) * omega_y
+    a_matrix[0,1] = delta_t * np.sin(phi) * (1/np.tan(theta))**2 * omega_y + delta_t * np.cos(phi) * (1 / np.tan(theta))**2 * omega_z
+    if np.isnan(a_matrix[0,1]) or np.isinf(a_matrix[0,1]):
+        a_matrix[0,1] = 0
     a_matrix[0,2] = 0
-    a_matrix[0,3] = delta_t * math.cos(theta) * math.cos(psi) 
-    a_matrix[0,4] = delta_t * math.cos(theta) * math.sin(psi) 
-    a_matrix[0,5] = delta_t*math.sin(theta)
-    a_matrix[0,6] =  0 
-    a_matrix[0,7] = (v_x * (-math.sin(theta)) * math.cos(psi) + v_y *(-math.sin(theta)) * math.sin(psi) - v_z * math.cos(theta)) * delta_t
-    a_matrix[0,8] = delta_t * (v_x * math.cos(theta) * (-math.sin(psi )) + v_y * math.cos(theta) * math.cos(psi))
-    a_matrix[1,0] = 0
+    a_matrix[1,0] = -delta_t * np.sin(phi)*omega_y - delta_t * np.cos(phi) * omega_z
     a_matrix[1,1] = 1
     a_matrix[1,2] = 0
-    a_matrix[1,3] = delta_t * ( math.sin(phi)* math.sin(theta) * math.cos(psi) - math.cos(phi) * math.sin(psi)  )
-    a_matrix[1,4] = delta_t * (math.sin(phi) * math.sin(theta) * math.sin(psi) + math.cos(phi) * math.cos(psi) )
-    a_matrix[1,5] =  delta_t * (math.sin(phi) * math.cos(theta))
-    a_matrix[1,6] =  delta_t * (v_x * (math.cos(phi) * math.sin(theta) * math.cos(psi) + math.sin(phi) * math.sin(psi)) + v_y * (math.cos(phi) * math.sin(theta) * math.sin(psi) - math.sin(phi) * math.cos(psi)) + v_z * (math.cos(phi) * math.cos(theta)))
-    a_matrix[1,7] =   delta_t * (v_x * (math.cos(phi) * math.cos(theta) * math.cos(psi)) + v_y * (math.sin(phi) * math.cos(theta) * math.sin(psi)) + v_z * (math.sin(phi) * ( -math.sin(theta))))
-    a_matrix[1,8] = delta_t * (v_x * (math.sin(phi) * math.sin(theta) * (-math.sin(psi))) + v_y * (math.sin(phi) * math.sin(theta) * math.cos(psi) + math.cos(phi) * (-math.sin(psi))))
-    a_matrix[2,0] = 0
+    a_matrix[2,0] = delta_t * np.sin(phi) * omega_y * (-1/(np.cos(theta)**2))
+    if np.isnan(a_matrix[2,0]) or np.isinf(a_matrix[0,1]):
+        a_matrix[2,0] = 0
     a_matrix[2,1] = 0
-    a_matrix[2,2] = 1
-    a_matrix[2,3] = delta_t * (math.cos(phi) * math.sin(theta) * math.cos(psi) + math.sin(phi) * math.sin(psi))
-    a_matrix[2,4] = delta_t * (math.cos(phi) * math.sin(theta) * math.sin(psi) - math.sin(phi) * math.cos(psi))
-    a_matrix[2,5] =  delta_t * (math.cos(phi) * math.cos(theta))
-    a_matrix[2,6] =  delta_t * (v_x * ((-math.sin(phi)) * math.sin(theta) * math.cos(psi) + math.cos(phi) * math.sin(psi)) + v_y*((-math.sin(phi)) * math.sin(theta) * math.sin(psi) - math.cos(phi) * math.cos(psi) ) + v_z * ((-math.sin(phi)) * math.cos(theta)))
-    a_matrix[2,7] =   delta_t * (v_x * (math.cos(phi) * math.cos(theta) * math.cos(psi)) + v_y * (math.cos(phi) * math.cos(theta) * math.sin(psi) ) + v_z * ((math.cos(phi) * (-math.sin(theta)))))
-    a_matrix[2,8] = delta_t * (v_x * (math.cos(phi) * math.sin(theta) * (-math.sin(psi)) + math.sin(phi) * math.cos(psi) ) + v_y * (math.cos(phi) * math.sin(theta) * math.cos(psi) + math.sin(phi) * math.sin(psi)))
-
-    a_matrix[3, 0] = 0
-    a_matrix[3, 1] = 0
-    a_matrix[3, 2] = 0
-    a_matrix[3, 3] = 1
-    a_matrix[3, 4] = delta_t * (-omega_z)
-    a_matrix[3, 5] = delta_t * (omega_y)
-    a_matrix[3, 6] = 0
-    a_matrix[3, 7] = delta_t * (-gravitational_constant * math.cos(theta))
-    a_matrix[3, 8] = 0
-    a_matrix[4, 0] = 0
-    a_matrix[4, 1] = 0
-    a_matrix[4, 2] = 0
-    a_matrix[4, 3] = delta_t * (omega_z)
-    a_matrix[4, 4] = 1
-    a_matrix[4, 5] = delta_t * (-omega_x)
-    a_matrix[4, 6] = delta_t * (gravitational_constant * math.cos(phi) * math.cos(theta))
-    a_matrix[4, 7] = delta_t * (gravitational_constant * math.sin(phi) * (-math.sin(theta)))
-    a_matrix[4, 8] = 0
-    a_matrix[5, 0] = 0
-    a_matrix[5, 1] = 0
-    a_matrix[5, 2] = 0
-    a_matrix[5, 3] = delta_t * (-omega_y)
-    a_matrix[5, 4] = delta_t * (omega_x)
-    a_matrix[5, 5] = 1
-    a_matrix[5, 6] = delta_t * (gravitational_constant * (-math.sin(phi)) * math.cos(theta))
-    a_matrix[5, 7] = delta_t * (gravitational_constant * math.cos(phi) * (-math.sin(theta)))
-    a_matrix[5, 8] = 0
-    a_matrix[6, 0] = 0
-    a_matrix[6, 1] = 0
-    a_matrix[6, 2] = 0
-    a_matrix[6, 3] = 0
-    a_matrix[6, 4] = 0
-    a_matrix[6, 5] = 0
-    a_matrix[6, 6] = 1 + math.cos(phi) * math.tan(theta) * omega_y - math.sin(phi) * math.tan(theta) * omega_z
-    a_matrix[6, 7] = math.sin(phi) * ((1/math.cos(theta)) ** 2) * omega_y + math.cos(phi) * ((1/math.cos(theta)) ** 2) * omega_z
-    a_matrix[6, 8] = 0
-    a_matrix[7, 0] = 0
-    a_matrix[7, 1] = 0
-    a_matrix[7, 2] = 0
-    a_matrix[7, 3] = 0
-    a_matrix[7, 4] = 0
-    a_matrix[7, 5] = 0
-    a_matrix[7, 6] = -math.sin(phi) * omega_y - math.cos(phi) * math.cos(omega_z)
-    a_matrix[7, 7] = 1
-    a_matrix[7, 8] = 0
-    a_matrix[8, 0] = 0
-    a_matrix[8, 1] = 0
-    a_matrix[8, 2] = 0
-    a_matrix[8, 3] = 0
-    a_matrix[8, 4] = 0
-    a_matrix[8, 5] = 0
-    a_matrix[8, 6] = (math.cos(phi) / math.cos(theta)) * omega_y + (-math.sin(phi) / math.cos(theta)) * omega_z
-    a_matrix[8, 7] = math.sin(phi) * omega_y * (-1 / (math.cos(theta)) ** 2) * (-math.sin(theta)) + math.cos(
-        phi) * omega_z * (-1 / (math.cos(theta) ** 2)) * (-math.sin(theta))
-    a_matrix[8, 8] = 1
+    a_matrix[2,2] = 0
 
     return a_matrix
 
 
-def get_c_matrix(state_t_given_t_minus_one: Any, magnitational_vector: Any):
+def get_c_matrix(state_t_given_t_minus_one: Any, magnitational_vector: Any, gravity: float = 9.81):
 
-    s_x, s_y, s_z = state_t_given_t_minus_one[0:3, 0]
-    v_x, v_y, v_z = state_t_given_t_minus_one[3:6, 0]
-    phi, theta, psi = state_t_given_t_minus_one[6:, 0]
+    #s_x, s_y, s_z = state_t_given_t_minus_one[0:3, 0]
+    #v_x, v_y, v_z = state_t_given_t_minus_one[3:6, 0]
+    phi, theta, psi = state_t_given_t_minus_one[:3, 0]
 
     a, _, b = magnitational_vector[:, 0]
 
-    c_matrix = np.zeros((3,9))
-
-    """
-
-    c_matrix[0, 0] = 0
-    c_matrix[0, 1] = 0
-    c_matrix[0, 2] = 0
-    c_matrix[0, 3] = 0
-    c_matrix[0, 4] = 0
-    c_matrix[0, 5] = 0
-    c_matrix[0, 6] = 1
-    c_matrix[0, 7] = 0
-    c_matrix[0, 8] = 0
-    c_matrix[1, 0] = 0
-    c_matrix[1, 1] = 0
-    c_matrix[1, 2] = 0
-    c_matrix[1, 3] = 0
-    c_matrix[1, 4] = 0
-    c_matrix[1, 5] = 0
-    c_matrix[1, 6] = 2 * np.cos(phi) * np.cos(theta) / (np.cos(2 * phi) - np.cos(2 * theta) - 2)
-    c_matrix[1, 7] = 2 * np.sin(phi) * np.sin(theta) / (np.cos(2 * phi) - np.cos(2 * theta) - 2)
-    c_matrix[1, 8] = 0
-    c_matrix[2, 0] = 0
-    c_matrix[2, 1] = 0
-    c_matrix[2, 2] = 0
-    c_matrix[2, 3] = 0
-    c_matrix[2, 4] = 0
-    c_matrix[2, 5] = 0
-    c_matrix[2, 6] = a * (1 / np.cos(phi)) ** 2 * (1 / np.sin(theta)) * (1 / np.cos(theta)) / (
-                a ** 2 + np.tan(phi) ** 2 * (1 / np.sin(theta)) ** 2 * (1 / np.cos(theta)) ** 2)
-    c_matrix[2, 7] = a * np.tan(phi) * np.cos(2 * theta) * (1 / np.sin(theta)) ** 2 * (
-                1 / np.cos(theta)) ** 2 / (
-                                 a ** 2 + np.tan(phi) ** 2 * (1 / np.sin(theta)) ** 2 * (1 / np.cos(theta)) ** 2)
-    c_matrix[2, 8] = 0
-    """
-    c_matrix[0, 6] = 1
-    c_matrix[1, 7] = 1
-    c_matrix[2, 8] = 1
+    c_matrix = np.zeros((3,3))
+    c_matrix[0,0] = 0
+    c_matrix[0,1] = gravity * np.cos(theta)
+    c_matrix[0,2] = 0
+    c_matrix[1,0] = -gravity * np.cos(theta) * np.cos(phi)
+    c_matrix[1,1] = gravity * np.sin(phi) * np.sin(theta)
+    c_matrix[1,2] = 0
+    c_matrix[2,0] = gravity * np.sin(phi) * np.cos(theta)
+    c_matrix[2,1] = gravity * np.cos(phi) * np.sin(theta)
+    c_matrix[2,2] = 0
 
     return c_matrix
 
@@ -250,9 +172,9 @@ def get_c_matrix(state_t_given_t_minus_one: Any, magnitational_vector: Any):
 def get_next_true_state(prior_state: Any, delta_t: float, angular_rotation: Any,
                         noise: Any, accelerometer: Any,
                         gravitational_constant: float = -9.81):
-    s_x, s_y, s_z = prior_state[0:3, 0]
-    v_x, v_y, v_z = prior_state[3:6, 0]
-    phi, theta, psi = prior_state[6:, 0]
+    #s_x, s_y, s_z = prior_state[0:3, 0]
+    #v_x, v_y, v_z = prior_state[3:6, 0]
+    phi, theta, psi = prior_state[:3, 0]
 
     omega_x, omega_y, omega_z = angular_rotation[:, 0]
 
@@ -265,27 +187,24 @@ def get_next_true_state(prior_state: Any, delta_t: float, angular_rotation: Any,
     # new_state[3, 0] = v_x + delta_t * (a_x - gravitational_constant * math.sin(theta)  + omega_y * v_z - omega_z * v_y)
     # new_state[4, 0] = v_y + delta_t * (a_y + gravitational_constant * math.sin(phi) * math.cos(theta) - omega_x * v_z + omega_z * v_x)
     # new_state[5, 0] = v_z + delta_t * (a_z + gravitational_constant * math.cos(phi) * math.cos(theta) + omega_x * v_y - omega_y * v_x )
-    new_state[6, 0] = phi + omega_x * delta_t #+ math.sin(phi) * math.tan(omega_y) + math.cos(phi) * math.tan(theta) * omega_z
-    new_state[7, 0] = theta + omega_y * delta_t #math.cos(phi) * omega_y - math.sin(phi) * omega_z
-    new_state[8, 0] = psi + omega_z * delta_t #(math.sin(phi) / np.cos(theta)) * omega_y + (math.cos(phi) / np.cos(theta)) * omega_z
+    new_state[0, 0] = phi + delta_t * (omega_x + np.sin(phi) * np.tan(theta) * omega_y + np.cos(phi) * np.tan(theta) * omega_z ) #+ math.sin(phi) * math.tan(omega_y) + math.cos(phi) * math.tan(theta) * omega_z
+    new_state[1, 0] = theta + delta_t * (np.cos(phi) * omega_y - np.sin(phi) * omega_z) #math.cos(phi) * omega_y - math.sin(phi) * omega_z
+    new_state[2, 0] = psi + delta_t * (np.sin(phi) * omega_y / np.cos(theta) + np.cos(phi) * omega_z / np.cos(theta) )#(math.sin(phi) / np.cos(theta)) * omega_y + (math.cos(phi) / np.cos(theta)) * omega_z
 
     return new_state + noise
 
-def calc_digital_compass2(state_estimate: Any, gravity, magnitational_vector):
 
-    phi, theta, psi = state_estimate[6:, 0]
+def rotate_accelerometer_data(accel_data: Any):
+    g_b_x, g_b_y, g_b_z = accel_data[:, 0]
+    #accel_data[1, 0] = g_b_y
+    return accel_data
 
-    a, _, b = magnitational_vector[:, 0]
-
-    digital_compass = np.zeros((3,1))
-    digital_compass[0,0] = math.atan2((-gravity * math.sin(phi) * math.cos(theta)), (-gravity * math.cos(phi) * math.cos(theta)))
-    digital_compass[1, 0] = math.atan2((gravity * math.sin(theta)),
-                                       (-gravity * math.sin(phi) * math.cos(theta) * math.sin(phi) - gravity * math.cos(phi) * math.cos(theta) * math.cos(phi)))
-    digital_compass[2, 0] = math.atan2((-math.sin(phi)), (a * math.cos(theta) * math.sin(theta) * math.cos(phi) * b))
-    return digital_compass
+def rotate_magnetometer_data(magn_data: Any):
+    m_b_x, m_b_y, m_b_z = magn_data[:, 0]
+    return magn_data
 
 
-def calc_digital_compass(accelerometer: Any, magnetometer: Any, gravity: float, magnitational_vector: Any):
+def calc_digital_compass(accelerometer: Any, magnitational_vector: Any):
 
     """
     phi, theta, psi = state_estimate[6:, 0]
@@ -298,25 +217,41 @@ def calc_digital_compass(accelerometer: Any, magnetometer: Any, gravity: float, 
                                        (-gravity * math.sin(phi) * math.cos(theta) * math.sin(phi) - gravity * math.cos(phi) * math.cos(theta) * math.cos(phi)))
     digital_compass[2, 0] = math.atan2((-math.sin(phi)), (a * math.cos(theta) * math.sin(theta) * math.cos(phi) * b))
     """
-    g_b_x, g_b_y, g_b_z = accelerometer[:, 0]
+    sin_angle = 0
+    cos_angle = 0
+    m_b_x_derotated, m_b_y_derotated, m_b_z_derotated = 0, 0, 0
+    m_b_x, m_b_y, m_b_z = rotate_magnetometer_data(magnitational_vector)
+
+    g_b_x, g_b_y, g_b_z = rotate_accelerometer_data(accelerometer)
 
     phi = math.atan2(g_b_y, g_b_z)
-    theta = math.atan2(-g_b_x, (g_b_y * math.sin(phi) + g_b_z * math.cos(phi)))
 
-    x_rotation = np.array([[1, 0, 0],
-                           [0, math.cos(phi), -math.sin(phi)],
-                            [0, math.sin(phi), math.cos(phi)]])
+    sin_angle = math.sin(phi)
+    cos_angle = math.cos(phi)
 
-    y_rotation = np.array([[math.cos(theta), 0, math.sin(theta)],
-                           [0, 1, 0],
-                           [-math.sin(theta), 0, math.cos(theta)]])
+    m_b_y_derotated = m_b_y * cos_angle - m_b_z * sin_angle
+    m_b_z = m_b_y * sin_angle + m_b_z * cos_angle
 
-    h_hor = y_rotation @ (x_rotation @ magnitational_vector)
+    # theta = math.atan2(-g_b_x, (math.sqrt((g_b_y**2) + (g_b_z**2))))
+    theta = math.atan2(-g_b_x, (g_b_y * sin_angle + g_b_z * cos_angle))
+    sin_angle = math.sin(theta)
+    cos_angle = math.cos(theta)
 
-    h_hor_y = h_hor[1, 0]
-    h_hor_x = h_hor[0, 0]
+    m_b_x_derotated = m_b_x * cos_angle + m_b_z * sin_angle
+    m_b_z_derotated = -m_b_x * sin_angle + m_b_z * cos_angle
 
-    psi = math.atan2(h_hor_y, h_hor_x)
+    # m_hor_x = m_b_x * math.cos(theta) + m_b_y * math.sin(theta) * math.sin(phi) + m_b_z*math.sin(theta)*math.cos(phi)
+    # m_hor_y = m_b_y * math.cos(phi) - m_b_z * math.sin(phi)
+    #
+
+
+    # h_hor = y_rotation @ x_rotation @ magnitational_vector
+    # h_hor_y_2 = h_hor[1, 0]
+    # h_hor_x_2 = h_hor[0, 0]
+
+    # todo: why does the y here need to be pos and the x need to be negative?
+    # todo: most formulas take opposite convention, are our axis rotated for magnetometer?
+    psi = math.atan2(m_b_y_derotated, -m_b_x_derotated)
 
     orientation = np.zeros((3,1))
     orientation[0,0] = phi
@@ -325,11 +260,20 @@ def calc_digital_compass(accelerometer: Any, magnetometer: Any, gravity: float, 
 
     return orientation
 
+def get_expected_measurement(state_estimate: Any, gravity: float = 9.81):
+    phi, theta, psi = state_estimate[:, 0]
+    expected_measurement = np.zeros(state_estimate.shape)
+    expected_measurement[0, 0] = -gravity * (-np.sin(theta))
+    expected_measurement[1, 0] = -gravity * np.sin(phi) * np.cos(theta)
+    expected_measurement[2, 0] = -gravity * np.cos(phi) * np.cos(theta)
+    return expected_measurement
+
+
 
 def get_mu_sigma_extended_kalman(
         initial_state: Any, initial_covariance: Any, Q: Any,
         R: Any, process_noise_series: Any, gyroscope_data: Any, accelerometer_data: Any, time_step_data: Any, gravity: float,
-        magnetic_vector: Any):
+        magnetometer_data: Any):
 
     time_steps = gyroscope_data.shape[0]
     mu_estimates = np.zeros((time_steps + 1, initial_state.shape[0], 1))
@@ -350,6 +294,7 @@ def get_mu_sigma_extended_kalman(
 
         accel_measurement = accelerometer_data[i - 1, :].reshape((3,1))
         gyro_measurement = gyroscope_data[i - 1, :].reshape((3,1))
+        magneto_measurement = magnetometer_data[i-1, :].reshape((3,1))
         delta_t = time_step_data[i - 1, 0] - prior_time_seconds
         prior_time_seconds = time_step_data[i - 1, 0]
         process_noise = process_noise_series[ i -1, :, :]
@@ -364,11 +309,13 @@ def get_mu_sigma_extended_kalman(
         sigma_t_given_t_minus_one = np.matmul(a_matrix, np.matmul(
             sigma_t_minus_one_given_t_minus_one, a_matrix.transpose())) + Q
 
-        measurement = calc_digital_compass(accel_measurement, np.zeros((3,1)), -9.81, magnetic_vector)
+        #measurement = calc_digital_compass(accel_measurement, magneto_measurement)
+        measurement = get_expected_measurement(mu_t_given_t_minus_one, gravity)
 
-        error_vs_estimate = measurement - mu_t_given_t_minus_one[6:, :]
+        # error_vs_estimate = measurement - mu_t_given_t_minus_one[:3, :]
+        error_vs_estimate = accel_measurement - measurement
 
-        c_matrix = get_c_matrix(mu_t_given_t_minus_one, magnetic_vector)
+        c_matrix = get_c_matrix(mu_t_given_t_minus_one, magneto_measurement)
 
         sigma_ct = np.matmul(
             sigma_t_given_t_minus_one, c_matrix.transpose())
@@ -399,38 +346,12 @@ def main():
         ground_truth.shape[0], np.zeros((INITIAL_ESTIMATE.shape[0], 1)),
         Q)
 
-    a_matrix = get_a_matrix(INITIAL_ESTIMATE, 0.01, np.zeros((3,1)))
-    
-    # c_matrix = get_c_matrix(INITIAL_ESTIMATE, np.zeros((3,1)))
-
-    next_state = get_next_true_state(INITIAL_ESTIMATE, 0.01, np.zeros((3,1)),
-                        np.zeros((9,1)), np.zeros((3,1)),
-                        gravitational_constant = -9.81)
-
-    magnetic_field = np.zeros((3,1))
-
-    """
-     magnetic north vector mg = [cos(ϕ
-    L) − sin(ϕ
-    L)]T
-    , where ϕ
-    L
-    is the geographical latitude angle. For the geographical position of the laboratory (geographic coordinates: 50.35363, 18.9148285), where measurements were
-    done, we have ϕ
-    L = 66o = 1.1519 rad.
-    """
-    # x, y, z, for Shelton, WA
-    magnetic_field[0,0] = math.cos(1.1519)
-    magnetic_field[1,0] = 0
-    magnetic_field[2,0] = -math.sin(1.1519)
-
     mu_estimates, sigma_estimates, run_times = get_mu_sigma_extended_kalman(INITIAL_ESTIMATE, INITIAL_COVARIANCE,
                                         Q, R, process_noise, ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[:, :], ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[:, :], ground_truth[["time_s"]].values[:, :], -9.81,
-       magnetic_field)
+       ground_truth[["imu_magn_x",
+                  "imu_magn_y", "imu_magn_z"]].values[:, :])
 
     orientation_measurements_digital_compass = np.zeros((ground_truth.shape[0], 3, 1))
-    orientation_measurements_gyro = np.zeros((ground_truth.shape[0], 3, 1))
-    orientation_measurements_true_state = np.zeros((ground_truth.shape[0], 3, 1))
 
     orientation_gyro = np.zeros((3,1))
     prior_state = np.zeros((9,1))
@@ -438,46 +359,45 @@ def main():
         accel_measurement = ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[i, :].reshape((3,1))
         gyro_measurement = ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[i, :].reshape((3,1))
         magneto_measurement = ground_truth[["imu_magn_x", "imu_magn_y", "imu_magn_z"]].values[i, :].reshape((3,1))
-        orientation = calc_digital_compass(accel_measurement, np.zeros((3,1)), -9.81, magnetic_field)
-
-        next_state = get_next_true_state(prior_state, 0.01, gyro_measurement,
-            np.zeros((9,1)), accel_measurement,
-            -9.81)
-
-        prior_state = next_state
-
-        orientation_gyro = orientation_gyro + magneto_measurement
+        orientation = calc_digital_compass(accel_measurement, magneto_measurement)
 
         orientation_measurements_digital_compass[i, :, :] = orientation
-        orientation_measurements_gyro[i, :, :] = orientation_gyro
-        orientation_measurements_true_state[i, :, :] = next_state[6:, :]
 
-    orientation_measurements_true_state = orientation_measurements_true_state * 180 / np.pi
-    orientation_measurements_true_state = np.mod(orientation_measurements_true_state, 360)
-
-    estimates_to_plot = 8500
 
     fig, ax = plt.subplots(3, 1, sharex=True)
-    fig.suptitle("Ground Truth, {} from imu_repo".format(os.path.basename(DATASET_PATH)))
-    ax[0].plot(ground_truth["time_s"], ground_truth["orientation_x"], label="true_orientation_x_radians")
-    #ax[0].plot(ground_truth["time_s"], orientation_measurements_digital_compass[:, 0, 0], label="compass_orientation_x_radians")
-    ax[0].plot(ground_truth["time_s"].values[:estimates_to_plot], mu_estimates[1:estimates_to_plot+1, 6, 0], label="estimate_orientation_x_radians")
-    ax[1].plot(ground_truth["time_s"], ground_truth["orientation_y"], label="true_orientation_y_radians")
-    #ax[1].plot(ground_truth["time_s"], orientation_measurements_digital_compass[:, 1, 0], label="compass_orientation_y_radians")
-    ax[1].plot(ground_truth["time_s"].values[:estimates_to_plot], mu_estimates[1:estimates_to_plot+1, 7, 0], label="estimate_orientation_y_radians")
-    ax[2].plot(ground_truth["time_s"], ground_truth["orientation_z"], label="true_orientation_z_radians")
-    #ax[2].plot(ground_truth["time_s"], orientation_measurements_digital_compass[:, 2, 0], label="compass_orientation_z_radians")
-    ax[2].plot(ground_truth["time_s"].values[:estimates_to_plot], mu_estimates[1:estimates_to_plot+1, 8, 0], label="estimate_orientation_z_radians")
-    ax[0].legend()
-    ax[1].legend()
-    ax[2].legend()
+    labels = ["x", "y", "z"]
+    cols = ["orientation_x", "orientation_y", "orientation_z"]
+    for i in range(3):
+        axes_label = labels[i]
+        col = cols[i]
+        ax[i].plot(ground_truth["time_s"], ground_truth[col], label="true_orientation_{}_radians".format(axes_label))
+        ax[i].plot(ground_truth["time_s"], orientation_measurements_digital_compass[:, i, 0],
+                   label="compass_orientation_{}_radians".format(axes_label))
+        ax[i].plot(ground_truth["time_s"], mu_estimates[1:, i, 0],
+                   label="ekf_{}_radians".format(axes_label))
+        ax[i].legend(loc="lower right")
+
+    # ax[0].set_title("Ground Truth vs Sensor Model {}".format(os.path.basename(DATASET_PATH)))
+
+    fig.suptitle("Ground Truth vs Sensor Model, {} from imu_repo".format(os.path.basename(DATASET_PATH)))
+    # ax[2].plot(ground_truth["time_s"].values[:estimates_to_plot], mu_estimates[1:estimates_to_plot+1, 8, 0], label="estimate_orientation_z_radians")
     plt.show()
 
-    fig, ax = plt.subplots(1, 1)
-    ax.plot(ground_truth["time_s"].values, sigma_estimates[1:, 6, 6])
-    ax.set_xlabel("time")
-    ax.set_ylabel("variance")
-    fig.suptitle("Variance of X Angle Estimate Over Time")
+    fig, ax = plt.subplots(3, 2, sharex=True)
+    labels = ["x", "y", "z"]
+
+    for i in range(3):
+        label = labels[i]
+        ax[i][0].plot(ground_truth["time_s"], ground_truth["imu_acc_{}".format(axes_label)],
+                      label="accelerometer_{}".format(axes_label))
+        ax[i][0].set_ylabel("acceleration_{}".format(axes_label))
+
+        ax[i][1].plot(ground_truth["time_s"], ground_truth["imu_magn_{}".format(axes_label)],
+                      label="magnetometer_{}".format(axes_label))
+        ax[i][1].set_ylabel("magnetometer_{}".format(axes_label))
+    ax[0][0].set_title("Raw Accelerometer Data")
+    ax[0][1].set_title("Raw Magnetometer Data")
+
     plt.show()
 
 
