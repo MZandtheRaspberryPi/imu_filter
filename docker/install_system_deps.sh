@@ -1,6 +1,8 @@
 #!/usr/bin/bash
 
-dependencies=(python3-pip nano)
+set -eux o pipefail
 
-sudo apt-get update
-sudo apt-get install -y ${dependencies[*]}
+dependencies=(python3.10 python3-pip nano)
+
+apt-get update
+apt-get install -y ${dependencies[*]}

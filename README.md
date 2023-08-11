@@ -66,3 +66,13 @@ Can check values when stationary and ensure -1g and 1g.
 
 # coordinate system imu 
 https://epan-utbm.github.io/utbm_robocar_dataset/docs/MTi-28A53G25.pdf
+
+## Docker
+
+From root of git repo:
+```
+./build_docker_image.sh
+docker login
+docker tag sha256:bc9a68bb410cd35bd600cd3e18c84357cccd9cb09f145fa3dc4c709858df55f2 mzandtheraspberrypi/imu-filter-ubuntu22-arm64:2023-08-11
+docker push mzandtheraspberrypi/imu-filter-ubuntu22-arm64:2023-08-11
+```
