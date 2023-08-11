@@ -1,5 +1,7 @@
 # imu_filter
 
+![example workflow](https://github.com/MZandtheRaspberryPi/imu_filter/actions/workflows/pipeline.yaml/badge.svg)
+
 Uses dataset from Szczesna et Al. in 2016. Paper [here](https://www.researchgate.net/publication/307076277_Reference_Data_Set_for_Accuracy_Evaluation_of_Orientation_Estimation_Algorithms_for_Inertial_Motion_Capture_Systems).
 
 Szczęsna, A., Skurowski, P., Pruszowski, P., Pęszor, D., Paszkuta, M., & Wojciechowski, K. (2016, September). Reference data set for accuracy evaluation of orientation estimation algorithms for inertial motion capture systems. In International Conference on Computer Vision and Graphics (pp. 509-520). Springer, Cham.

@@ -1,0 +1,16 @@
+name: Python package
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: self-hosted
+    container:
+      image: mzandtheraspberrypi/imu-filter-ubuntu22-arm64:2023-08-11
+      options: --cpus 1
+    steps:
+      - name: Check Version
+
+        run: |
+          python3 --version
+          python3 -m pip freeze
