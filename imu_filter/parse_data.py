@@ -42,8 +42,8 @@ def get_y_rotation(theta: float):
     return y_rotation
 
 def get_z_rotation(psi: float):
-    z_rotation = np.array([[math.cos(psi), math.sin(psi), 0],
-                           [-math.sin(psi), math.cos(psi), 0],
+    z_rotation = np.array([[math.cos(psi), -math.sin(psi), 0],
+                           [math.sin(psi), math.cos(psi), 0],
                            [0, 0, 1]])
     return z_rotation
 
@@ -119,6 +119,13 @@ def load_dataset(dataset_path: str):
     df["orientation_z"] = np.arctan2(2*(qw * qz + qx * qy), ((1 - 2*(qy**2 + qz**2))))
     return df
 
+
+def get_a_matrix_saito(
+        prior_state: Any, delta_t: float, angular_rotation: Any,
+        gravitational_constant: float = -9.81):
+    pass
+
+
 def get_a_matrix(
         prior_state: Any, delta_t: float, angular_rotation: Any,
         gravitational_constant: float = -9.81):
@@ -169,7 +176,68 @@ def get_c_matrix(state_t_given_t_minus_one: Any, magnitational_vector: Any, grav
     return c_matrix
 
 
-def get_next_true_state(prior_state: Any, delta_t: float, angular_rotation: Any,
+def get_next_state_saito(prior_state: Any, delta_t: float, angular_rotation: Any,
+                        noise: Any, accelerometer: Any,
+                        gravitational_constant: float = -9.81):
+    phi, theta, psi = prior_state[:3, 0]
+
+    omega_x, omega_y, omega_z = angular_rotation[:, 0]
+
+
+
+    new_state = np.zeros((prior_state.shape[0], 1))
+
+    new_state[0, 0] = phi + delta_t * omega_x + delta_t * (np.sin(phi) * np.tan(theta) * omega_y)  + np.cos(phi) * np.tan(theta) * omega_z * delta_t
+    new_state[1, 0] = theta + delta_t * (np.cos(phi) * omega_y) - delta_t * (np.sin(psi) * omega_z)
+    new_state[2, 0] = psi + delta_t * (np.sin(phi) * 1/np.cos(theta) * omega_y ) + delta_t * (np.cos(phi) * 1/np.cos(theta) * omega_z)
+    return new_state
+
+
+def get_measurement_saito(state_estimate: Any, accelerometer: Any, magnetometer: Any):
+    phi, theta, psi = state_estimate[:, 0]
+    a_x, a_y, a_z = accelerometer[:, 0]
+    m_b_x, m_b_y, m_b_z = magnetometer[:, 0]
+
+    rotation_matrix = np.zeros((3,3))
+    rotation_matrix[0,0] = np.cos(theta)
+    rotation_matrix[0,1] = np.sin(phi) * np.sin(theta)
+    rotation_matrix[0,2] = np.cos(phi) * np.sin(theta)
+
+    rotation_matrix[1,0] = 0
+    rotation_matrix[1,1] = np.cos(phi)
+    rotation_matrix[1,2] = -np.sin(phi)
+
+    rotation_matrix[2,0] = -np.sin(theta)
+    rotation_matrix[2,1] = np.sin(phi) * np.cos(theta)
+    rotation_matrix[2,2] = np.cos(phi) * np.cos(theta)
+
+    rotated_magnetometer = np.matmul(rotation_matrix, magnetometer)
+
+    rotated_m_y = rotated_magnetometer[1, 0]
+    rotated_m_x = rotated_magnetometer[0, 0]
+
+    psi = np.arctan2(-rotated_m_y, rotated_m_x)
+
+    measurement = np.zeros((4,1))
+    measurement[0,0] = psi
+    measurement[1:4, 0] = accelerometer[0:3, 0]
+    return measurement
+
+
+def get_expected_measurement_saito(state_estimate: Any, gravity: float = 9.81):
+
+    phi, theta, psi = state_estimate[:, 0]
+    expected_measurement = np.zeros((4,1))
+    expected_measurement[1, 0] = gravity * (-np.sin(theta))
+    expected_measurement[2, 0] = gravity * np.sin(phi) * np.cos(theta)
+    expected_measurement[3, 0] = gravity * np.cos(phi) * np.cos(theta)
+    expected_measurement[0, 0] = psi
+
+    return expected_measurement
+
+
+
+def get_next_state(prior_state: Any, delta_t: float, angular_rotation: Any,
                         noise: Any, accelerometer: Any,
                         gravitational_constant: float = -9.81):
     #s_x, s_y, s_z = prior_state[0:3, 0]
@@ -299,7 +367,7 @@ def get_mu_sigma_extended_kalman(
         prior_time_seconds = time_step_data[i - 1, 0]
         process_noise = process_noise_series[ i -1, :, :]
 
-        mu_t_given_t_minus_one = get_next_true_state(prior_estimate, delta_t, gyro_measurement,
+        mu_t_given_t_minus_one = get_next_state(prior_estimate, delta_t, gyro_measurement,
             process_noise, accel_measurement,
             gravity)
 
@@ -346,10 +414,10 @@ def main():
         ground_truth.shape[0], np.zeros((INITIAL_ESTIMATE.shape[0], 1)),
         Q)
 
-    mu_estimates, sigma_estimates, run_times = get_mu_sigma_extended_kalman(INITIAL_ESTIMATE, INITIAL_COVARIANCE,
-                                        Q, R, process_noise, ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[:, :], ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[:, :], ground_truth[["time_s"]].values[:, :], -9.81,
-       ground_truth[["imu_magn_x",
-                  "imu_magn_y", "imu_magn_z"]].values[:, :])
+    # mu_estimates, sigma_estimates, run_times = get_mu_sigma_extended_kalman(INITIAL_ESTIMATE, INITIAL_COVARIANCE,
+    #                                     Q, R, process_noise, ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[:, :], ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[:, :], ground_truth[["time_s"]].values[:, :], -9.81,
+    #    ground_truth[["imu_magn_x",
+    #               "imu_magn_y", "imu_magn_z"]].values[:, :])
 
     orientation_measurements_digital_compass = np.zeros((ground_truth.shape[0], 3, 1))
 
@@ -373,8 +441,8 @@ def main():
         ax[i].plot(ground_truth["time_s"], ground_truth[col], label="true_orientation_{}_radians".format(axes_label))
         ax[i].plot(ground_truth["time_s"], orientation_measurements_digital_compass[:, i, 0],
                    label="compass_orientation_{}_radians".format(axes_label))
-        ax[i].plot(ground_truth["time_s"], mu_estimates[1:, i, 0],
-                   label="ekf_{}_radians".format(axes_label))
+        # ax[i].plot(ground_truth["time_s"], mu_estimates[1:, i, 0],
+        #            label="ekf_{}_radians".format(axes_label))
         ax[i].legend(loc="lower right")
 
     # ax[0].set_title("Ground Truth vs Sensor Model {}".format(os.path.basename(DATASET_PATH)))
