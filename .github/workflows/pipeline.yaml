@@ -9,8 +9,32 @@ jobs:
       image: mzandtheraspberrypi/imu-filter-ubuntu22-arm64:2023-08-11
       options: --cpus 1
     steps:
-      - name: Check Version
-
+      - name: check_versions
         run: |
           python3 --version
           python3 -m pip freeze
+      # in a container git doesn't trust some stuff and submodules doesn't work
+      # https://github.com/actions/checkout/issues/1169
+      - name: git_correct_dir
+        run: |
+          git config --system --add safe.directory /__w/imu_filter/imu_filter
+      - name: checkout_repo
+        uses: actions/checkout@v2.3.4
+        with:
+          submodules: 'true'
+      - name: examine_files
+        run: |
+          pwd
+          ls
+      - name: generate_graph
+        env:
+          graph_name: "orientation_vs_estimate.png"
+        run: |
+          export PYTHONPATH=imu_filter:$PYTHONPATH
+          python3 imu_filter/generate_graphs.py
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: graphs
+          path: |
+            orientation_vs_estimate.png

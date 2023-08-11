@@ -407,31 +407,23 @@ def get_mu_sigma_extended_kalman(
 
     return mu_estimates, sigma_estimates, total_time / time_steps
 
-def main():
-    ground_truth = load_dataset(DATASET_PATH)
 
-    process_noise = get_gaussian_noise(
-        ground_truth.shape[0], np.zeros((INITIAL_ESTIMATE.shape[0], 1)),
-        Q)
-
-    # mu_estimates, sigma_estimates, run_times = get_mu_sigma_extended_kalman(INITIAL_ESTIMATE, INITIAL_COVARIANCE,
-    #                                     Q, R, process_noise, ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[:, :], ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[:, :], ground_truth[["time_s"]].values[:, :], -9.81,
-    #    ground_truth[["imu_magn_x",
-    #               "imu_magn_y", "imu_magn_z"]].values[:, :])
-
+def get_digital_compass_time_series(ground_truth: Any):
     orientation_measurements_digital_compass = np.zeros((ground_truth.shape[0], 3, 1))
 
-    orientation_gyro = np.zeros((3,1))
-    prior_state = np.zeros((9,1))
+    orientation_gyro = np.zeros((3, 1))
+    prior_state = np.zeros((9, 1))
     for i in range(ground_truth.shape[0]):
-        accel_measurement = ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[i, :].reshape((3,1))
-        gyro_measurement = ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[i, :].reshape((3,1))
-        magneto_measurement = ground_truth[["imu_magn_x", "imu_magn_y", "imu_magn_z"]].values[i, :].reshape((3,1))
+        accel_measurement = ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[i, :].reshape((3, 1))
+        gyro_measurement = ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[i, :].reshape((3, 1))
+        magneto_measurement = ground_truth[["imu_magn_x", "imu_magn_y", "imu_magn_z"]].values[i, :].reshape((3, 1))
         orientation = calc_digital_compass(accel_measurement, magneto_measurement)
 
         orientation_measurements_digital_compass[i, :, :] = orientation
+    return orientation_measurements_digital_compass
 
 
+def get_estimate_plots_vs_ground_truth(ground_truth: Any, orientation_measurements_digital_compass: Any):
     fig, ax = plt.subplots(3, 1, sharex=True)
     labels = ["x", "y", "z"]
     cols = ["orientation_x", "orientation_y", "orientation_z"]
@@ -449,28 +441,50 @@ def main():
 
     fig.suptitle("Ground Truth vs Sensor Model, {} from imu_repo".format(os.path.basename(DATASET_PATH)))
     # ax[2].plot(ground_truth["time_s"].values[:estimates_to_plot], mu_estimates[1:estimates_to_plot+1, 8, 0], label="estimate_orientation_z_radians")
-    plt.show()
+    return fig
 
+def get_measurement_time_series(ground_truth: Any):
     fig, ax = plt.subplots(3, 2, sharex=True)
     labels = ["x", "y", "z"]
-
     for i in range(3):
         label = labels[i]
-        ax[i][0].plot(ground_truth["time_s"], ground_truth["imu_acc_{}".format(axes_label)],
-                      label="accelerometer_{}".format(axes_label))
-        ax[i][0].set_ylabel("acceleration_{}".format(axes_label))
+        ax[i][0].plot(ground_truth["time_s"], ground_truth["imu_acc_{}".format(label)],
+                      label="accelerometer_{}".format(label))
+        ax[i][0].set_ylabel("acceleration_{}".format(label))
 
-        ax[i][1].plot(ground_truth["time_s"], ground_truth["imu_magn_{}".format(axes_label)],
-                      label="magnetometer_{}".format(axes_label))
-        ax[i][1].set_ylabel("magnetometer_{}".format(axes_label))
+        ax[i][1].plot(ground_truth["time_s"], ground_truth["imu_magn_{}".format(label)],
+                      label="magnetometer_{}".format(label))
+        ax[i][1].set_ylabel("magnetometer_{}".format(label))
     ax[0][0].set_title("Raw Accelerometer Data")
     ax[0][1].set_title("Raw Magnetometer Data")
 
-    plt.show()
+    return fig
 
+def main(orientation_estimates_path_name: str = None, measurement_estimates_path_name: str = None):
+    ground_truth = load_dataset(DATASET_PATH)
 
-    # graph digital compass vs orientation
+    process_noise = get_gaussian_noise(
+        ground_truth.shape[0], np.zeros((INITIAL_ESTIMATE.shape[0], 1)),
+        Q)
 
+    # mu_estimates, sigma_estimates, run_times = get_mu_sigma_extended_kalman(INITIAL_ESTIMATE, INITIAL_COVARIANCE,
+    #                                     Q, R, process_noise, ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[:, :], ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[:, :], ground_truth[["time_s"]].values[:, :], -9.81,
+    #    ground_truth[["imu_magn_x",
+    #               "imu_magn_y", "imu_magn_z"]].values[:, :])
+
+    orientation_measurements_digital_compass = get_digital_compass_time_series(ground_truth)
+
+    fig = get_estimate_plots_vs_ground_truth(ground_truth, orientation_measurements_digital_compass)
+    if orientation_estimates_path_name is None:
+        plt.show()
+    else:
+        fig.savefig(orientation_estimates_path_name)
+
+    fig = get_measurement_time_series(ground_truth)
+    if measurement_estimates_path_name is None:
+        plt.show()
+    else:
+        fig.savefig(measurement_estimates_path_name)
 
 if __name__ == "__main__":
     main()
