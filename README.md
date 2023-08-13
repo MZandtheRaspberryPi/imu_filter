@@ -46,6 +46,40 @@ f = [phi + p + sin(phi)*tan(theta)*q + cos(phi)*tan(theta)*r;
      psi + sin(phi)*q/cos(theta) + cos(phi)*r/cos(theta)]
 A = jacobian(f, x)
 ```
+
+saito
+```
+syms omega_x omega_y omega_z
+syms phi theta psi
+syms delta_t
+x = [phi; theta; psi]
+f = [phi + omega_x * delta_t + sin(phi)*tan(theta)*omega_y * delta_t + cos(phi)*tan(theta)*omega_z*delta_t;
+     theta + cos(phi)*omega_y * delta_t - sin(phi)*omega_z*delta_t;
+     psi + sin(phi)*omega_y/cos(theta) * delta_t + cos(phi)*omega_z/cos(theta)*delta_t]
+A = jacobian(f, x)
+```
+
+'''
+syms phi theta psi
+X_ROT = [[1 0 0;]
+         [0 cos(phi) -sin(phi)];
+         [0 sin(phi) cos(phi)]]
+Y_ROT = [[cos(theta) 0 sin(theta)];
+         [0 1 0];
+         [-sin(theta) 0 cos(theta)]]
+Z_ROT = [[cos(psi) -sin(psi) 0];
+         [sin(psi) cos(psi) 0];
+         [0 0 1]]
+ROT_MAT = (Z_ROT * (Y_ROT * X_ROT))
+ROT_MAT_T = transpose(ROT_MAT)
+G = [0; 0; 9.81]
+H_PRELIM = ROT_MAT_T * G
+H = [psi; H_PRELIM(1); H_PRELIM(2); H_PRELIM(3)]
+x = [phi; theta; psi]
+h = jacobian(H, x)
+'''
+
+
 or for measurement matrix
 
 ```

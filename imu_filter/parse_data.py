@@ -17,7 +17,7 @@ import numpy as np
 import scipy
 
 Q = 0.01 * np.eye(3)
-R = 0.1 * np.eye(3)
+R = 0.1 * np.eye(4)
 
 INITIAL_ESTIMATE = np.zeros((3,1))
 
@@ -25,7 +25,7 @@ INITIAL_COVARIANCE = 0.1 * np.eye(3)
 
 THIS_FILE_DIR = os.path.dirname(__file__)
 DATASET_DIR = os.path.join(THIS_FILE_DIR, "..", "RepoIMU")
-DATASET_PATH = os.path.join(DATASET_DIR, "TStick", "TStick_Test11_Trial1.csv")
+DATASET_PATH = os.path.join(DATASET_DIR, "TStick", "TStick_Test11_Trial2.csv")
 
 def get_x_rotation(phi: float):
 
@@ -114,16 +114,45 @@ def load_dataset(dataset_path: str):
 
     qw, qx, qy, qz = quat_cols[:, 0] , quat_cols[:, 1], quat_cols[:, 2], quat_cols[:, 3]
 
-    df["orientation_x"] = np.arctan2(2*(qw * qx + qy * qz), ((1 - 2*(qy**2 + qz**2))))
-    df["orientation_y"] = -math.pi / 2 + 2 * np.arctan2(np.sqrt(1+2*(qw * qy - qx * qz)), np.sqrt(1 - 2*(qw*qy + qx*qz)))
-    df["orientation_z"] = np.arctan2(2*(qw * qz + qx * qy), ((1 - 2*(qy**2 + qz**2))))
+
+    df["orientation_x"] = np.arctan2(2*(qw * qx + qy * qz), (1 - 2*(qy*qy + qx*qx)))
+
+    t_2 = 2 * (qw * qy - qz * qx)
+    t_2 = np.where(t_2 > 1, 1, t_2)
+    t_2 = np.where(t_2 < -1, -1, t_2)
+    df["orientation_y"] = np.arcsin(t_2)
+
+    t_3 = 2 * (qw * qz + qx * qy)
+    t_4 = 1 - 2 * (qy * qy + qz * qz)
+    df["orientation_z"] = np.arctan2(t_3, t_4)
     return df
 
 
 def get_a_matrix_saito(
         prior_state: Any, delta_t: float, angular_rotation: Any,
         gravitational_constant: float = -9.81):
-    pass
+
+    phi, theta, psi = prior_state[:3, 0]
+
+    omega_x, omega_y, omega_z = angular_rotation[:, 0]
+
+    a_matrix = np.zeros((prior_state.shape[0], prior_state.shape[0]))
+
+    a_matrix[0, 0] = delta_t * omega_y * np.cos(phi) * np.tan(theta) - delta_t * omega_z * np.sin(phi) * np.tan(theta) + 1
+    a_matrix[0, 1] = delta_t * omega_y * np.sin(phi) * (np.tan(theta)**2 + 1) + delta_t * omega_z * np.cos(phi) * (np.tan(theta)**2 + 1)
+    a_matrix[0, 2] = 0
+    a_matrix[1, 0] = -delta_t * omega_y * np.sin(phi) - delta_t * omega_z * np.cos(phi)
+    a_matrix[1, 1] = 1
+    a_matrix[1, 2] = 0
+    a_matrix[2, 0] = delta_t * omega_y * np.cos(phi) / np.cos(theta) - delta_t * omega_z * np.sin(phi) / np.cos(theta)
+    a_matrix[2, 1] = delta_t * omega_y * np.sin(phi) * np.sin(theta) / (np.cos(theta) ** 2) + delta_t * omega_z * np.sin(theta) * np.cos(phi) / (np.cos(theta) ** 2)
+    a_matrix[2, 2] = 1
+
+    if np.isnan(a_matrix[2, 0]) or np.isinf(a_matrix[2, 0]):
+        a_matrix[2, 0] = 0
+    if np.isnan(a_matrix[2, 1]) or np.isinf(a_matrix[2, 1]):
+        a_matrix[2, 0] = 0
+    return a_matrix
 
 
 def get_a_matrix(
@@ -146,8 +175,9 @@ def get_a_matrix(
     a_matrix[1,1] = 1
     a_matrix[1,2] = 0
     a_matrix[2,0] = delta_t * np.sin(phi) * omega_y * (-1/(np.cos(theta)**2))
-    if np.isnan(a_matrix[2,0]) or np.isinf(a_matrix[0,1]):
+    if np.isnan(a_matrix[2,0]) or np.isinf(a_matrix[2,0]):
         a_matrix[2,0] = 0
+
     a_matrix[2,1] = 0
     a_matrix[2,2] = 0
 
@@ -172,6 +202,25 @@ def get_c_matrix(state_t_given_t_minus_one: Any, magnitational_vector: Any, grav
     c_matrix[2,0] = gravity * np.sin(phi) * np.cos(theta)
     c_matrix[2,1] = gravity * np.cos(phi) * np.sin(theta)
     c_matrix[2,2] = 0
+
+    return c_matrix
+
+def get_c_matrix_saito(state_t_given_t_minus_one: Any, magnitational_vector: Any, gravity: float = 9.81):
+    phi, theta, psi = state_t_given_t_minus_one[:3, 0]
+
+    c_matrix = np.zeros((4,3))
+    c_matrix[0,0] = 0
+    c_matrix[0,1] = 0
+    c_matrix[0,2] = 1
+    c_matrix[1,0] = 0
+    c_matrix[1,1] = -gravity * np.cos(theta)
+    c_matrix[1,2] = 0
+    c_matrix[2,0] = gravity * np.cos(phi) * np.cos(theta)
+    c_matrix[2,1] = -gravity * np.sin(phi) * np.sin(theta)
+    c_matrix[2,2] = 0
+    c_matrix[3,0] = -gravity * np.sin(phi) * np.cos(theta)
+    c_matrix[3,1] = -gravity * np.sin(theta) * np.cos(phi)
+    c_matrix[3,2] = 0
 
     return c_matrix
 
@@ -216,7 +265,8 @@ def get_measurement_saito(state_estimate: Any, accelerometer: Any, magnetometer:
     rotated_m_y = rotated_magnetometer[1, 0]
     rotated_m_x = rotated_magnetometer[0, 0]
 
-    psi = np.arctan2(-rotated_m_y, rotated_m_x)
+    # had to flip signs here to get it to line up...where in paper it was neg m_y, pos m_x.
+    psi = np.arctan2(rotated_m_y, -rotated_m_x)
 
     measurement = np.zeros((4,1))
     measurement[0,0] = psi
@@ -408,6 +458,78 @@ def get_mu_sigma_extended_kalman(
     return mu_estimates, sigma_estimates, total_time / time_steps
 
 
+def get_mu_sigma_extended_kalman_saito(
+        initial_state: Any, initial_covariance: Any, Q: Any,
+        R: Any, process_noise_series: Any, gyroscope_data: Any, accelerometer_data: Any, time_step_data: Any, gravity: float,
+        magnetometer_data: Any):
+
+    time_steps = gyroscope_data.shape[0]
+    mu_estimates = np.zeros((time_steps + 1, initial_state.shape[0], 1))
+    mu_estimates[0, :, :] = initial_state
+
+    sigma_estimates = np.zeros(
+        (time_steps + 1, initial_state.shape[0],
+         initial_state.shape[0]))
+    sigma_estimates[0, :, :] = initial_covariance
+
+    prior_time_seconds = 0
+
+    total_time = 0.0
+    for i in range(1, accelerometer_data.shape[0] + 1):
+        start_time = time.time()
+        prior_estimate = mu_estimates[i - 1, :, :]
+        sigma_t_minus_one_given_t_minus_one = sigma_estimates[i - 1, :, :]
+
+        accel_measurement = accelerometer_data[i - 1, :].reshape((3,1))
+        gyro_measurement = gyroscope_data[i - 1, :].reshape((3,1))
+        magneto_measurement = magnetometer_data[i-1, :].reshape((3,1))
+        delta_t = time_step_data[i - 1, 0] - prior_time_seconds
+        prior_time_seconds = time_step_data[i - 1, 0]
+        process_noise = process_noise_series[ i -1, :, :]
+
+        mu_t_given_t_minus_one = get_next_state_saito(prior_estimate, delta_t, gyro_measurement,
+            process_noise, accel_measurement,
+            gravity)
+
+        a_matrix = get_a_matrix_saito(prior_estimate, delta_t, gyro_measurement,
+            gravity)
+
+        sigma_t_given_t_minus_one = np.matmul(a_matrix, np.matmul(
+            sigma_t_minus_one_given_t_minus_one, a_matrix.transpose())) + Q
+
+        #measurement = calc_digital_compass(accel_measurement, magneto_measurement)
+        expected_measurement = get_expected_measurement_saito(mu_t_given_t_minus_one, gravity)
+
+        measurement = get_measurement_saito(mu_t_given_t_minus_one, accel_measurement, magneto_measurement)
+
+        # error_vs_estimate = measurement - mu_t_given_t_minus_one[:3, :]
+        error_vs_estimate = measurement - expected_measurement
+
+        c_matrix = get_c_matrix_saito(mu_t_given_t_minus_one, magneto_measurement)
+
+        sigma_ct = np.matmul(
+            sigma_t_given_t_minus_one, c_matrix.transpose())
+        c_sigma_ct = np.matmul(c_matrix, sigma_ct)
+        c_sigma_ct_plus_R = c_sigma_ct + R
+        error_scaling_paranthesis = np.linalg.inv(c_sigma_ct_plus_R)
+        error_scaling = np.matmul(
+            sigma_t_given_t_minus_one, np.matmul(
+                c_matrix.transpose(),
+                error_scaling_paranthesis))
+        mu_t_given_t = mu_t_given_t_minus_one + \
+                       np.matmul(error_scaling, error_vs_estimate)
+        mu_estimates[i, :, :] = mu_t_given_t
+
+        cov_update = sigma_t_given_t_minus_one - \
+                     np.matmul(error_scaling, np.matmul(
+                         c_matrix, sigma_t_given_t_minus_one))
+        sigma_estimates[i, :, :] = cov_update
+
+        total_time += time.time() - start_time
+
+    return mu_estimates, sigma_estimates, total_time / time_steps
+
+
 def get_digital_compass_time_series(ground_truth: Any):
     orientation_measurements_digital_compass = np.zeros((ground_truth.shape[0], 3, 1))
 
@@ -423,7 +545,8 @@ def get_digital_compass_time_series(ground_truth: Any):
     return orientation_measurements_digital_compass
 
 
-def get_estimate_plots_vs_ground_truth(ground_truth: Any, orientation_measurements_digital_compass: Any):
+def get_estimate_plots_vs_ground_truth(ground_truth: Any, orientation_measurements_digital_compass: Any,
+                                       orientation_estimate_ekf: Any):
     fig, ax = plt.subplots(3, 1, sharex=True)
     labels = ["x", "y", "z"]
     cols = ["orientation_x", "orientation_y", "orientation_z"]
@@ -433,8 +556,8 @@ def get_estimate_plots_vs_ground_truth(ground_truth: Any, orientation_measuremen
         ax[i].plot(ground_truth["time_s"], ground_truth[col], label="true_orientation_{}_radians".format(axes_label))
         ax[i].plot(ground_truth["time_s"], orientation_measurements_digital_compass[:, i, 0],
                    label="compass_orientation_{}_radians".format(axes_label))
-        # ax[i].plot(ground_truth["time_s"], mu_estimates[1:, i, 0],
-        #            label="ekf_{}_radians".format(axes_label))
+        ax[i].plot(ground_truth["time_s"], orientation_estimate_ekf[1:, i, 0],
+                   label="ekf_{}_radians".format(axes_label))
         ax[i].legend(loc="lower right")
 
     # ax[0].set_title("Ground Truth vs Sensor Model {}".format(os.path.basename(DATASET_PATH)))
@@ -472,9 +595,14 @@ def main(orientation_estimates_path_name: str = None, measurement_estimates_path
     #    ground_truth[["imu_magn_x",
     #               "imu_magn_y", "imu_magn_z"]].values[:, :])
 
+    mu_estimates, sigma_estimates, run_times = get_mu_sigma_extended_kalman_saito(INITIAL_ESTIMATE, INITIAL_COVARIANCE,
+                                        Q, R, process_noise, ground_truth[["imu_gyro_x", "imu_gyro_y", "imu_gyro_z"]].values[:, :], ground_truth[["imu_acc_x", "imu_acc_y", "imu_acc_z"]].values[:, :], ground_truth[["time_s"]].values[:, :], -9.81,
+       ground_truth[["imu_magn_x",
+                  "imu_magn_y", "imu_magn_z"]].values[:, :])
+
     orientation_measurements_digital_compass = get_digital_compass_time_series(ground_truth)
 
-    fig = get_estimate_plots_vs_ground_truth(ground_truth, orientation_measurements_digital_compass)
+    fig = get_estimate_plots_vs_ground_truth(ground_truth, orientation_measurements_digital_compass, mu_estimates)
     if orientation_estimates_path_name is None:
         plt.show()
     else:
