@@ -201,11 +201,12 @@ A[2][2] =& 1 \\
 
 
 
-For the measurement model, let's assume static state. We could flesh this out further by making our acceleration measurement equal to linear, rotational, and gravity vector. But let's keep it simple for now.
+For the measurement model, let's assume static state. We could flesh this out further by making our acceleration measurement equal to linear, rotational, and gravity vector. But let's keep it simple for now. In the below, we model measurements of yaw from magnetometer calculation, and accelerometer observations.
 \begin{align}
-y_t(\theta) = \begin{bmatrix} g_x^b \\  g_y^b \\  g_z^b \end{bmatrix} =& -g \begin{bmatrix} -sin \theta\\
-													             sin \phi cos \theta \\
-													              cos \phi cos \theta \end{bmatrix} \nonumber
+y_t(\theta) = \begin{bmatrix} \psi_m \\ a_x^b \\  a_y^b \\  a_z^b \end{bmatrix} =& \begin{bmatrix} \psi\\
+															 -g -sin \theta\\
+													              -g sin \phi cos \theta \\
+													               -g cos \phi cos \theta \end{bmatrix} \nonumber
 \end{align}
 
 \begin{align*}
